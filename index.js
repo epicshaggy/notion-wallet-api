@@ -5,6 +5,30 @@ const formatISO = require("date-fns/formatISO");
 
 const app = express();
 
+app.use(function (req, res, next) {
+  // Website you wish to allow to connect
+  res.setHeader("Access-Control-Allow-Origin", "http://localhost:8100");
+
+  // Request methods you wish to allow
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, OPTIONS, PUT, PATCH, DELETE"
+  );
+
+  // Request headers you wish to allow
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "X-Requested-With,content-type"
+  );
+
+  // Set to true if you need the website to include cookies in the requests sent
+  // to the API (e.g. in case you use sessions)
+  res.setHeader("Access-Control-Allow-Credentials", false);
+
+  // Pass to next layer of middleware
+  next();
+});
+
 const port = 3000;
 
 function getNotionClient(token) {
@@ -105,17 +129,7 @@ async function getPropertyValue(page_id, property_id, client) {
 }
 
 app.get("/", async (req, res) => {
-  const token = req.query.token;
-  const client = getNotionClient(token);
-  const dbId = await getDatabaseIdByName("Expenses", client);
-
-  if (!dbId) {
-    res.status(404).send("Database not found");
-    return;
-  }
-
-  const entries = await getExpenses(dbId, client).catch(() => null);
-  res.send(entries);
+  res.send("<h1>Hello World!</h1>");
 });
 
 app.get("/expenses", async (req, res) => {
