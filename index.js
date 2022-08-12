@@ -124,6 +124,49 @@ async function getExpenses(client) {
   return response;
 }
 
+async function getExpectedBalance(client) {
+  const database_id = await getDatabaseIdByName("Balance", client).catch(
+    () => null
+  );
+  if (!database_id) {
+    return;
+  }
+
+  // const queryProps = ["Description", "Date", "Amount"];
+  const filter = {
+    and: [
+      {
+        property: "Time Period",
+        title: {
+          equals: "August",
+        },
+      },
+    ],
+  };
+
+  let response = await client.databases
+    .query({
+      database_id,
+      filter,
+    })
+    .catch(() => null);
+
+  if (!response?.results?.length) return;
+
+  const page_id = response.results[0].id;
+  const expectedBalance = response.results[0].properties["Expected Balance"];
+  const value = await getPropertyValue(
+    page_id,
+    expectedBalance.id,
+    client
+  ).catch(() => null);
+
+  if (!value) return;
+
+  expectedBalance.value = value.formula.number;
+  return expectedBalance;
+}
+
 async function getPropertyValue(page_id, property_id, client) {
   const response = await client.pages.properties.retrieve({
     page_id,
@@ -140,6 +183,19 @@ app.get("/expenses", async (req, res) => {
   const token = req.query.token;
   const client = getNotionClient(token);
   const response = await getExpenses(client).catch(() => null);
+  if (!response) {
+    res.status(404).send();
+    return;
+  }
+
+  res.send(response);
+});
+
+app.get("/expected-balance", async (req, res) => {
+  const token = req.query.token;
+  const client = getNotionClient(token);
+  const response = await getExpectedBalance(client).catch(() => null);
+
   if (!response) {
     res.status(404).send();
     return;
