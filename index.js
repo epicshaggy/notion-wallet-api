@@ -1,16 +1,21 @@
 const express = require("express");
 const { Client } = require("@notionhq/client");
-const formatISO = require("date-fns/formatISO");
 const dotenv = require("dotenv");
+const formidable = require("express-formidable");
+const { parseISO, format, formatISO } = require("date-fns");
+
 dotenv.config();
 
 const app = express();
+
+app.use(formidable());
 
 app.use(function (req, res, next) {
   // Website you wish to allow to connect
   res.setHeader(
     "Access-Control-Allow-Origin",
     "https://gleeful-biscuit-12259f.netlify.app"
+    // "http://localhost:8100"
   );
 
   // Request methods you wish to allow
@@ -138,7 +143,7 @@ async function getExpectedBalance(client) {
       {
         property: "Time Period",
         title: {
-          equals: "August",
+          equals: format(new Date(), "MMMM"),
         },
       },
     ],
@@ -175,6 +180,48 @@ async function getPropertyValue(page_id, property_id, client) {
   return response;
 }
 
+async function getBalanceIds(page, client) {
+  const balanceDbId = await getDatabaseIdByName("Balance", client).catch(
+    () => null
+  );
+
+  if (!balanceDbId) return;
+
+  const filter = {
+    or: [
+      {
+        property: "Time Period",
+        title: {
+          equals: format(parseISO(page.date), "MMMM"),
+        },
+      },
+      {
+        property: "Time Period",
+        title: {
+          equals: format(parseISO(page.date), "yyyy"),
+        },
+      },
+    ],
+  };
+
+  const response = await client.databases
+    .query({
+      database_id: balanceDbId,
+      filter,
+    })
+    .catch(() => null);
+
+  if (!response?.results?.length) return;
+
+  const ids = [];
+
+  response.results.forEach((entry) => {
+    ids.push({ id: entry.id });
+  });
+
+  return ids;
+}
+
 app.get("/", async (req, res) => {
   res.send("<h1>Hello World!</h1>");
 });
@@ -202,6 +249,124 @@ app.get("/expected-balance", async (req, res) => {
   }
 
   res.send(response);
+});
+
+app.get("/expense", async (req, res) => {
+  const token = req.query.token;
+  const client = getNotionClient(token);
+  const page_id = req.query.page_id;
+  const response = await client.pages
+    .update({ page_id, archived: true })
+    .catch(() => {
+      null;
+    });
+
+  if (!response) {
+    res.status(500).send({ message: "Something went wrong" });
+    return;
+  }
+
+  res.send(response);
+});
+
+app.get("/complete-expense", async (req, res) => {
+  const token = req.query.token;
+  const client = getNotionClient(token);
+  const page_id = req.query.page_id;
+  const response = await client.pages
+    .update({
+      page_id,
+      properties: {
+        Status: {
+          select: {
+            name: "Complete",
+          },
+        },
+      },
+    })
+    .catch((err) => {
+      null;
+    });
+
+  if (!response) {
+    res.status(500).send({ message: "Something went wrong" });
+    return;
+  }
+
+  res.send(response);
+});
+
+app.post("/expense", async (req, res) => {
+  const token = req.query.token;
+  const client = getNotionClient(token);
+
+  const database_id = await getDatabaseIdByName("Expenses", client).catch(
+    () => null
+  );
+
+  if (!database_id) {
+    res.status(500).send({ message: "Something went wrong" });
+    return;
+  }
+
+  const page = req.fields;
+
+  const balanceRelations = await getBalanceIds(page, client);
+
+  if (!balanceRelations?.length) {
+    res.status(500).send({ message: "Something went wrong" });
+    return;
+  }
+
+  const response = await client.pages
+    .create({
+      parent: {
+        type: "database_id",
+        database_id,
+      },
+      properties: {
+        Description: {
+          title: [
+            {
+              text: {
+                content: page.description,
+              },
+            },
+          ],
+        },
+        Date: {
+          date: {
+            start: page.date,
+          },
+        },
+        Amount: {
+          number: parseInt(page.amount),
+        },
+        Balance: {
+          relation: balanceRelations,
+        },
+        Card: {
+          select: {
+            name: "Discover it",
+          },
+        },
+        Status: {
+          select: {
+            name: "Pending",
+          },
+        },
+      },
+    })
+    .catch((err) => {
+      null;
+    });
+
+  if (!response) {
+    res.status(500).send({ message: "Something went wrong" });
+    return;
+  }
+
+  res.send({ id: response.id });
 });
 
 app.listen(port, () => {
